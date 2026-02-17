@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Multi-Tab Relay</title>
+    <style>
+      body { font: 13px -apple-system, sans-serif; margin: 12px; width: 280px; }
+      button { width: 100%; margin: 4px 0; padding: 8px; }
+      .muted { color: #666; font-size: 12px; }
+      .row { margin: 6px 0; }
+    </style>
+  </head>
+  <body>
+    <div class="row"><strong>OpenClaw Multi-Tab Relay</strong></div>
+    <div class="row muted" id="status">Loading…</div>
+
+    <button id="attach">Attach this tab</button>
+    <button id="detach">Detach this tab</button>
+    <button id="setActive">Set this tab active</button>
+    <button id="reconnect">Reconnect bridge</button>
+
+    <div class="row muted" id="tabs"></div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
