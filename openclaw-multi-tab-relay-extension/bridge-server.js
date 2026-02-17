@@ -18,6 +18,7 @@ const { WebSocketServer } = require('ws');
 
 const PORT = 18793;
 const PATH = '/relay';
+const startedAt = Date.now();
 
 let extensionSocket = null;
 let extensionState = {
@@ -91,7 +92,15 @@ function settlePending(requestId, ok, payload) {
 const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && req.url === '/health') {
-      return json(res, 200, { ok: true, extensionConnected: extensionState.connected });
+      return json(res, 200, {
+        ok: true,
+        pid: process.pid,
+        uptimeSec: Math.floor((Date.now() - startedAt) / 1000),
+        extensionConnected: extensionState.connected,
+        activeTabId: extensionState.activeTabId,
+        attachedTabs: extensionState.attachedTabIds.length,
+        lastHelloAt: extensionState.lastHelloAt
+      });
     }
 
     if (req.method === 'GET' && req.url === '/api/state') {
