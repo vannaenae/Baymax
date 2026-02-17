@@ -1,38 +1,63 @@
-# OpenClaw Multi-Tab Relay Extension (Prototype)
+# OpenClaw Multi-Tab Relay Extension
 
-This is a **local prototype** to allow attaching and controlling multiple tabs at once.
+A Chrome extension prototype that lets you attach **multiple tabs** for OpenClaw workflows.
 
-## What it does
-- Attach multiple tabs (not just one)
-- Track active tab separately
-- Keep attached tab list in extension storage
-- Expose websocket relay to localhost bridge (`ws://127.0.0.1:18793/relay`)
+> Status: Prototype (public, usable, not yet wired into OpenClaw core browser routing by default)
 
-## What it does NOT do yet
-- It does not automatically replace OpenClaw’s built-in single-tab relay.
-- OpenClaw core would need to be pointed to this bridge/protocol for full integration.
+## Why this exists
+OpenClaw’s current Chrome relay flow is effectively single-active-tab for reliable control.
+This project adds a practical multi-tab control layer so you can:
+- attach several tabs
+- switch active control tab quickly
+- keep tab context during longer workflows
 
-## Install
-1. Open Chrome → `chrome://extensions`
+## Features
+- Attach / detach current tab
+- Track multiple attached tab IDs
+- Set active tab for command targeting
+- Local websocket bridge support (`ws://127.0.0.1:18793/relay`)
+- Persistent state in extension storage
+
+## Folder structure
+- `manifest.json` – extension config (MV3)
+- `service_worker.js` – core relay state + bridge handling
+- `popup.html` / `popup.js` – tab controls UI
+- `bridge-server.js` – local websocket bridge prototype
+
+## Install (Chrome)
+1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select this folder:
-   - `/Users/vanessaadetoro/clawd/openclaw-multi-tab-relay-extension`
+   - `openclaw-multi-tab-relay-extension`
 
-## Use
-1. Click extension icon on tab A → **Attach this tab**
-2. Go tab B → **Attach this tab**
-3. Go tab C → **Attach this tab**
-4. Set whichever tab is execution target using **Set this tab active**
+## Quick usage
+1. Open tab A → extension popup → **Attach this tab**
+2. Open tab B → **Attach this tab**
+3. Open tab C → **Attach this tab**
+4. Use **Set this tab active** on whichever tab should receive next commands
 
 ## Optional local bridge
-Run:
 ```bash
-cd /Users/vanessaadetoro/clawd/openclaw-multi-tab-relay-extension
+cd openclaw-multi-tab-relay-extension
 npm init -y
 npm i ws
 node bridge-server.js
 ```
 
-## Next integration step
-If you want, next I can build an OpenClaw-compatible adapter so browser tool calls route through this multi-tab bridge.
+Health check:
+- `http://127.0.0.1:18793/health`
+
+## Limitations
+- This does **not** automatically replace OpenClaw’s built-in extension relay.
+- An adapter is needed to route OpenClaw browser tool calls through this bridge by default.
+
+## Roadmap
+- [ ] OpenClaw-compatible adapter layer
+- [ ] Better auth/token handshake for bridge messages
+- [ ] Stable tab aliases (human names)
+- [ ] UI for attached tab list + quick switching
+- [ ] Packaging + store-ready metadata
+
+## License
+MIT
