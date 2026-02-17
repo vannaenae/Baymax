@@ -1,10 +1,13 @@
 const BRIDGE_URL = 'ws://127.0.0.1:18793/relay';
-const STATE_KEY = 'multiTabRelayStateV1';
-const KEEPALIVE_ALARM = 'relay-keepalive';
+const STATE_KEY = 'multiTabRelayStateV2';
+const HEALTH_ALARM = 'relay-health';
 
 let ws = null;
 let reconnectTimer = null;
-let reconnectDelayMs = 1000;
+let reconnectDelayMs = 800;
+
+// Keep SW alive via long-lived ports from attached tabs
+const keepalivePorts = new Map(); // tabId -> port
 
 let state = {
   attachedTabIds: [],
@@ -37,7 +40,7 @@ function send(msg) {
 function hello() {
   send({
     type: 'hello',
-    source: 'openclaw-multi-tab-relay',
+    source: 'openclaw-multi-tab-relay-v2',
     attachedTabIds: state.attachedTabIds,
     activeTabId: state.activeTabId,
     ts: Date.now()
@@ -57,7 +60,7 @@ function scheduleReconnect() {
     reconnectTimer = null;
     connectBridge();
   }, reconnectDelayMs);
-  reconnectDelayMs = Math.min(reconnectDelayMs * 2, 15000);
+  reconnectDelayMs = Math.min(reconnectDelayMs * 2, 12000);
 }
 
 function connectBridge() {
@@ -67,7 +70,7 @@ function connectBridge() {
     ws = new WebSocket(BRIDGE_URL);
 
     ws.onopen = async () => {
-      reconnectDelayMs = 1000;
+      reconnectDelayMs = 800;
       state.connected = true;
       state.lastError = null;
       state.lastSeenAt = Date.now();
@@ -106,9 +109,7 @@ async function ensureTabIsValid(tabId) {
     await chrome.tabs.get(tabId);
     return true;
   } catch {
-    state.attachedTabIds = state.attachedTabIds.filter((id) => id !== tabId);
-    if (state.activeTabId === tabId) state.activeTabId = state.attachedTabIds[0] ?? null;
-    await saveState();
+    await detachTab(tabId);
     return false;
   }
 }
@@ -129,7 +130,9 @@ async function handleBridgeCommand(msg) {
 
   if (msg.type === 'setActiveTab') {
     const tabId = Number(msg.tabId);
-    if (!state.attachedTabIds.includes(tabId)) return send({ type: 'error', requestId: msg.requestId, error: 'tab not attached' });
+    if (!state.attachedTabIds.includes(tabId)) {
+      return send({ type: 'error', requestId: msg.requestId, error: 'tab not attached' });
+    }
     state.activeTabId = tabId;
     await saveState();
     return send({ type: 'ok', requestId: msg.requestId });
@@ -164,10 +167,44 @@ async function handleBridgeCommand(msg) {
   }
 }
 
+async function injectKeepalive(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        if (window.__openclawKeepaliveInjected) return;
+        window.__openclawKeepaliveInjected = true;
+
+        let port = null;
+        const connect = () => {
+          try {
+            port = chrome.runtime.connect({ name: 'openclaw-keepalive' });
+            port.postMessage({ type: 'hello', ts: Date.now() });
+            const interval = setInterval(() => {
+              try { port?.postMessage({ type: 'ping', ts: Date.now() }); } catch {}
+            }, 10000);
+            port.onDisconnect.addListener(() => {
+              clearInterval(interval);
+              setTimeout(connect, 1500);
+            });
+          } catch {
+            setTimeout(connect, 1500);
+          }
+        };
+
+        connect();
+      }
+    });
+  } catch {
+    // ignore (tab may not allow injection like chrome://)
+  }
+}
+
 async function attachTab(tabId) {
   if (!state.attachedTabIds.includes(tabId)) state.attachedTabIds.push(tabId);
   if (!state.activeTabId) state.activeTabId = tabId;
   await saveState();
+  await injectKeepalive(tabId);
   hello();
   send({ type: 'tabAttached', tabId });
 }
@@ -175,43 +212,70 @@ async function attachTab(tabId) {
 async function detachTab(tabId) {
   state.attachedTabIds = state.attachedTabIds.filter((id) => id !== tabId);
   if (state.activeTabId === tabId) state.activeTabId = state.attachedTabIds[0] ?? null;
+  keepalivePorts.delete(tabId);
   await saveState();
   hello();
   send({ type: 'tabDetached', tabId });
 }
 
-async function setupKeepalive() {
-  await chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 });
+async function bootstrap() {
+  await loadState();
+  await updateBadge();
+  await chrome.alarms.create(HEALTH_ALARM, { periodInMinutes: 0.5 });
+  connectBridge();
+
+  // Re-inject keepalive into previously attached tabs
+  for (const tabId of state.attachedTabIds) {
+    await injectKeepalive(tabId);
+  }
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await loadState();
-  await updateBadge();
-  await setupKeepalive();
-  connectBridge();
+  await bootstrap();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
-  await loadState();
-  await updateBadge();
-  await setupKeepalive();
-  connectBridge();
+  await bootstrap();
+});
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'openclaw-keepalive') return;
+
+  let tabId = null;
+  try { tabId = port.sender?.tab?.id ?? null; } catch {}
+  if (tabId != null) keepalivePorts.set(tabId, port);
+
+  port.onMessage.addListener(async () => {
+    if (!state.connected) connectBridge();
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (tabId != null) keepalivePorts.delete(tabId);
+  });
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name !== KEEPALIVE_ALARM) return;
+  if (alarm.name !== HEALTH_ALARM) return;
   if (!state.connected) connectBridge();
   else hello();
-});
 
-chrome.tabs.onRemoved.addListener(async (tabId) => {
-  if (state.attachedTabIds.includes(tabId)) {
-    await detachTab(tabId);
+  for (const tabId of state.attachedTabIds) {
+    if (!keepalivePorts.has(tabId)) {
+      await injectKeepalive(tabId);
+    }
   }
 });
 
-chrome.tabs.onActivated.addListener(async () => {
-  if (!state.connected) connectBridge();
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  if (state.attachedTabIds.includes(tabId)) await detachTab(tabId);
+});
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (!state.attachedTabIds.includes(tabId)) return;
+  if (changeInfo.status === 'complete') {
+    await injectKeepalive(tabId);
+    if (!state.connected) connectBridge();
+  }
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -259,9 +323,4 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true;
 });
 
-(async () => {
-  await loadState();
-  await updateBadge();
-  await setupKeepalive();
-  connectBridge();
-})();
+bootstrap();
