@@ -114,6 +114,99 @@ async function ensureTabIsValid(tabId) {
   }
 }
 
+async function waitForTabComplete(tabId, timeoutMs = 10000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.status === 'complete') return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
+
+async function xPostViaDebugger(tabId, text) {
+  const target = { tabId };
+  const version = '1.3';
+
+  const sendCommand = (method, params = {}) =>
+    new Promise((resolve, reject) => {
+      chrome.debugger.sendCommand(target, method, params, () => {
+        const err = chrome.runtime.lastError;
+        if (err) reject(new Error(err.message));
+        else resolve();
+      });
+    });
+
+  await new Promise((resolve, reject) => {
+    chrome.debugger.attach(target, version, () => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(new Error(err.message));
+      else resolve();
+    });
+  });
+
+  try {
+    await sendCommand('Runtime.enable');
+    await sendCommand('Page.bringToFront');
+
+    await sendCommand('Runtime.evaluate', {
+      expression: `(() => {
+        const openComposer = () => {
+          const btn = document.querySelector('[data-testid="SideNav_NewTweet_Button"]') ||
+                      document.querySelector('a[href="/compose/post"]');
+          if (btn) btn.click();
+        };
+        openComposer();
+        return true;
+      })();`,
+      awaitPromise: true
+    });
+
+    await new Promise((r) => setTimeout(r, 700));
+
+    await sendCommand('Runtime.evaluate', {
+      expression: `(() => {
+        const box = document.querySelector('div[role="dialog"] div[role="textbox"][contenteditable="true"]') ||
+                    document.querySelector('[data-testid="tweetTextarea_0"]') ||
+                    document.querySelector('div[role="textbox"][contenteditable="true"]');
+        if (!box) return false;
+        box.focus();
+        const sel = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(box);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return true;
+      })();`,
+      awaitPromise: true
+    });
+
+    await sendCommand('Input.insertText', { text });
+    await new Promise((r) => setTimeout(r, 400));
+
+    await sendCommand('Runtime.evaluate', {
+      expression: `(() => {
+        const btn = document.querySelector('div[role="dialog"] [data-testid="tweetButton"]') ||
+                    document.querySelector('[data-testid="tweetButton"]') ||
+                    document.querySelector('[data-testid="tweetButtonInline"]');
+        if (!btn) return { ok:false, reason:'button-not-found' };
+        const disabled = btn.disabled || btn.getAttribute('aria-disabled') === 'true';
+        if (disabled) return { ok:false, reason:'button-disabled' };
+        btn.click();
+        return { ok:true };
+      })();`,
+      awaitPromise: true
+    });
+
+    return { posted: true, detail: 'clicked-post' };
+  } finally {
+    await new Promise((resolve) => {
+      chrome.debugger.detach(target, () => resolve());
+    });
+  }
+}
+
 async function handleBridgeCommand(msg) {
   if (!msg || !msg.type) return;
 
@@ -146,6 +239,26 @@ async function handleBridgeCommand(msg) {
     return send({ type: 'ok', requestId: msg.requestId });
   }
 
+  if (msg.type === 'xPost') {
+    const tabId = Number(msg.tabId ?? state.activeTabId);
+    if (!tabId) return send({ type: 'error', requestId: msg.requestId, error: 'no active tab' });
+    if (!(await ensureTabIsValid(tabId))) return send({ type: 'error', requestId: msg.requestId, error: 'tab missing' });
+
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      const url = String(tab.url || '');
+      if (!url.includes('x.com')) {
+        await chrome.tabs.update(tabId, { url: 'https://x.com/home' });
+        await waitForTabComplete(tabId, 12000);
+      }
+
+      const result = await xPostViaDebugger(tabId, String(msg.text || ''));
+      return send({ type: 'xPostResult', requestId: msg.requestId, posted: !!result.posted, detail: result.detail || null });
+    } catch (e) {
+      return send({ type: 'error', requestId: msg.requestId, error: String(e) });
+    }
+  }
+
   if (msg.type === 'eval') {
     const tabId = Number(msg.tabId ?? state.activeTabId);
     if (!tabId) return send({ type: 'error', requestId: msg.requestId, error: 'no active tab' });
@@ -157,10 +270,8 @@ async function handleBridgeCommand(msg) {
         func: (source) => {
           const code = String(source ?? '');
           try {
-            // Expression mode: "1+1" or "({ok:true})"
             return (new Function(`return (${code});`))();
           } catch {}
-          // Statement mode: "const x=1; return x+1;"
           return (new Function(code))();
         },
         args: [String(msg.script ?? '')]
