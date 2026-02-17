@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mission Control — Obsidian Intelligence</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            obsidian: '#050505',
+            panel: 'rgba(18,14,45,0.65)',
+            panelBorder: 'rgba(138,100,255,0.15)',
+            neon: '#39FF14'
+          },
+          boxShadow: {
+            neon: '0 0 0 1px rgba(57,255,20,.4), 0 0 12px rgba(57,255,20,.25)'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    body { background: #050505; }
+    .glass { background: rgba(18,14,45,0.65); border: 1px solid rgba(138,100,255,0.15); backdrop-filter: blur(8px); }
+    .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(138,100,255,.35); border-radius: 999px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: rgba(255,255,255,.03); }
+  </style>
+</head>
+<body class="h-full text-zinc-100 font-sans antialiased dark">
+  <div class="min-h-full p-4 md:p-6">
+    <header class="glass rounded-2xl px-4 py-3 mb-4">
+      <div class="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h1 class="text-xl md:text-2xl font-semibold tracking-wide">Mission Control</h1>
+          <p class="text-xs md:text-sm text-zinc-400">Obsidian Intelligence • Local-only Runtime</p>
+        </div>
+        <nav id="topTabs" class="flex gap-2 flex-wrap"></nav>
+      </div>
+    </header>
+
+    <main id="pageRoot" class="space-y-4"></main>
+  </div>
+
+  <!-- Cmd+K Terminal Overlay -->
+  <div id="terminalOverlay" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 p-4 md:p-10">
+    <div class="glass rounded-2xl h-full flex flex-col max-w-5xl mx-auto">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-white/10">
+        <h2 class="font-semibold">Direct Command Overlay</h2>
+        <button id="closeOverlay" class="text-sm px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700">Close (Cmd+K)</button>
+      </div>
+      <div id="overlayLog" class="flex-1 overflow-auto scrollbar-thin p-4 font-mono text-sm space-y-2"></div>
+      <div class="border-t border-white/10 p-3">
+        <form id="overlayForm" class="flex items-center gap-2">
+          <span class="text-neon text-sm md:text-base drop-shadow-[0_0_6px_rgba(57,255,20,.45)]">baymax@mc:~$</span>
+          <input id="overlayInput" autocomplete="off" class="flex-1 bg-transparent outline-none text-zinc-100 placeholder:text-zinc-500" placeholder="help" />
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit intent modal -->
+  <div id="editModal" class="hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm p-4 flex items-center justify-center">
+    <div class="glass rounded-2xl w-full max-w-lg p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">Edit Next Step</h3>
+        <button id="closeEditModal" class="text-xs px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700">Close</button>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <label class="text-sm space-y-1">Verb
+          <select id="editVerb" class="w-full bg-zinc-900 border border-white/10 rounded px-2 py-1">
+            <option>READ</option><option>CLICK</option><option>TYPE</option><option>NAVIGATE</option>
+          </select>
+        </label>
+        <label class="text-sm md:col-span-2 space-y-1">Target
+          <input id="editTarget" class="w-full bg-zinc-900 border border-white/10 rounded px-2 py-1" />
+        </label>
+      </div>
+      <label class="text-sm block space-y-1">Why
+        <input id="editWhy" class="w-full bg-zinc-900 border border-white/10 rounded px-2 py-1" />
+      </label>
+      <div class="flex justify-end">
+        <button id="saveEdit" class="px-3 py-1.5 rounded bg-neon text-black font-semibold shadow-neon">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
