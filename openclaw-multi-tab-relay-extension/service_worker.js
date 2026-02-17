@@ -155,8 +155,13 @@ async function handleBridgeCommand(msg) {
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId },
         func: (source) => {
-          // eslint-disable-next-line no-eval
-          return eval(source);
+          const code = String(source ?? '');
+          try {
+            // Expression mode: "1+1" or "({ok:true})"
+            return (new Function(`return (${code});`))();
+          } catch {}
+          // Statement mode: "const x=1; return x+1;"
+          return (new Function(code))();
         },
         args: [String(msg.script ?? '')]
       });
