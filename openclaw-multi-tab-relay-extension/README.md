@@ -37,6 +37,11 @@ This project adds a practical multi-tab control layer so you can:
 3. Open tab C → **Attach this tab**
 4. Use **Set this tab active** on whichever tab should receive next commands
 
+## Beginner guide
+If you want a simple non-technical walkthrough, use:
+
+- [BEGINNER_SETUP.md](./BEGINNER_SETUP.md)
+
 ## Optional local bridge
 ```bash
 cd openclaw-multi-tab-relay-extension
