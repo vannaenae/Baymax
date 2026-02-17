@@ -17,6 +17,8 @@ This project adds a practical multi-tab control layer so you can:
 - Set active tab for command targeting
 - Local websocket bridge support (`ws://127.0.0.1:18793/relay`)
 - Persistent state in extension storage
+- Auto-reconnect + keepalive for better relay stability
+- Dedicated X posting API endpoint (`POST /api/xPost`) for reliable automated posting
 
 ## Folder structure
 - `manifest.json` – extension config (MV3)
@@ -42,12 +44,20 @@ If you want a simple non-technical walkthrough, use:
 
 - [BEGINNER_SETUP.md](./BEGINNER_SETUP.md)
 
-## Optional local bridge
+## Local bridge (recommended)
 ```bash
 cd openclaw-multi-tab-relay-extension
-npm init -y
-npm i ws
-node bridge-server.js
+./scripts/start-seamless.sh
+```
+
+Status:
+```bash
+./scripts/status-seamless.sh
+```
+
+Stop:
+```bash
+./scripts/stop-seamless.sh
 ```
 
 Health check:
