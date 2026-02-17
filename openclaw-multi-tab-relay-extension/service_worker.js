@@ -1,13 +1,17 @@
 const BRIDGE_URL = 'ws://127.0.0.1:18793/relay';
 const STATE_KEY = 'multiTabRelayStateV1';
+const KEEPALIVE_ALARM = 'relay-keepalive';
 
 let ws = null;
 let reconnectTimer = null;
+let reconnectDelayMs = 1000;
+
 let state = {
   attachedTabIds: [],
   activeTabId: null,
   connected: false,
-  lastError: null
+  lastError: null,
+  lastSeenAt: null
 };
 
 async function loadState() {
@@ -30,21 +34,51 @@ function send(msg) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
 }
 
+function hello() {
+  send({
+    type: 'hello',
+    source: 'openclaw-multi-tab-relay',
+    attachedTabIds: state.attachedTabIds,
+    activeTabId: state.activeTabId,
+    ts: Date.now()
+  });
+}
+
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectBridge();
+  }, reconnectDelayMs);
+  reconnectDelayMs = Math.min(reconnectDelayMs * 2, 15000);
+}
+
 function connectBridge() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
   try {
     ws = new WebSocket(BRIDGE_URL);
+
     ws.onopen = async () => {
+      reconnectDelayMs = 1000;
       state.connected = true;
       state.lastError = null;
+      state.lastSeenAt = Date.now();
       await saveState();
-      send({ type: 'hello', source: 'openclaw-multi-tab-relay', attachedTabIds: state.attachedTabIds, activeTabId: state.activeTabId });
+      hello();
     };
 
     ws.onmessage = async (ev) => {
       let msg;
       try { msg = JSON.parse(ev.data); } catch { return; }
+      state.lastSeenAt = Date.now();
       await handleBridgeCommand(msg);
     };
 
@@ -65,14 +99,6 @@ function connectBridge() {
     saveState();
     scheduleReconnect();
   }
-}
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectBridge();
-  }, 1500);
 }
 
 async function ensureTabIsValid(tabId) {
@@ -142,6 +168,7 @@ async function attachTab(tabId) {
   if (!state.attachedTabIds.includes(tabId)) state.attachedTabIds.push(tabId);
   if (!state.activeTabId) state.activeTabId = tabId;
   await saveState();
+  hello();
   send({ type: 'tabAttached', tabId });
 }
 
@@ -149,25 +176,42 @@ async function detachTab(tabId) {
   state.attachedTabIds = state.attachedTabIds.filter((id) => id !== tabId);
   if (state.activeTabId === tabId) state.activeTabId = state.attachedTabIds[0] ?? null;
   await saveState();
+  hello();
   send({ type: 'tabDetached', tabId });
+}
+
+async function setupKeepalive() {
+  await chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 });
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
   await loadState();
   await updateBadge();
+  await setupKeepalive();
   connectBridge();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   await loadState();
   await updateBadge();
+  await setupKeepalive();
   connectBridge();
+});
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name !== KEEPALIVE_ALARM) return;
+  if (!state.connected) connectBridge();
+  else hello();
 });
 
 chrome.tabs.onRemoved.addListener(async (tabId) => {
   if (state.attachedTabIds.includes(tabId)) {
     await detachTab(tabId);
   }
+});
+
+chrome.tabs.onActivated.addListener(async () => {
+  if (!state.connected) connectBridge();
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -198,11 +242,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (!state.attachedTabIds.includes(tab.id)) await attachTab(tab.id);
       state.activeTabId = tab.id;
       await saveState();
+      hello();
       send({ type: 'activeTabChanged', tabId: tab.id });
       return sendResponse({ ok: true, state });
     }
 
     if (msg.type === 'reconnectBridge') {
+      clearReconnectTimer();
       connectBridge();
       return sendResponse({ ok: true });
     }
@@ -216,5 +262,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 (async () => {
   await loadState();
   await updateBadge();
+  await setupKeepalive();
   connectBridge();
 })();
